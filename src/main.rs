@@ -3,14 +3,24 @@ use std::net::{TcpListener, TcpStream};
 use std::io::{Write, BufRead, BufReader};
 use std::sync::{Arc,Mutex};
 
+fn read_stream(reader: &mut BufReader<TcpStream>) -> Result<Vec<u8>,()> {
+    let mut buffer = Vec::new();
+    let result = reader.read_until(b';', &mut buffer);
+
+    if result.is_err() {
+        return Err(());
+    } else if buffer.last() != Some(&b';') {
+        return Err(());
+    } else {
+        return Ok(buffer);
+    }
+}
+
 fn handle_stream(stream: TcpStream, data: Arc<Mutex<u8>>) {
     let mut reader = BufReader::new(stream);
-
     loop {
-        let mut buffer = Vec::new();
-        let result = reader.read_until(b';', &mut buffer);
-
-        if result.is_err() || buffer.last() != Some(&b';') {
+        let result = read_stream(&mut reader);
+        if result.is_err() {
             break;
         }
 
