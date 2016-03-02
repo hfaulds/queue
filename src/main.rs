@@ -1,43 +1,38 @@
 use std::thread;
-//use std::sync::mpsc;
 use std::net::{TcpListener, TcpStream};
 use std::io::{Write, Read};
+use std::sync::{Arc,Mutex};
 
-fn handle_stream(mut stream: TcpStream) {
-    let _ = stream.write(b"hello world");
-    let _ = stream.flush();
-    let mut buffer = [0; 10];
-    let _ = stream.read(&mut buffer);
-    let _ = stream.write(&mut buffer);
+fn handle_stream(mut stream: TcpStream, data: Arc<Mutex<u8>>) {
+    loop {
+        let mut buffer = [0; 10];
+        let _ = stream.read(&mut buffer);
+
+        {
+            let mut data = data.lock().unwrap();
+            *data += 1;
+
+            let _ = stream.write(format!("{}",*data).as_bytes());
+            let _ = stream.flush();
+        }
+    }
 }
 
 fn main() {
-    //let (tx, rx) = mpsc::channel();
     let listener = TcpListener::bind("127.0.0.1:5248").unwrap();
+
+    let data = Arc::new(Mutex::new(0));
 
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
+                let data = data.clone();
                 thread::spawn(move|| {
-                    handle_stream(stream);
+                    handle_stream(stream, data);
                 });
             }
             Err(_) => {
             }
         }
     }
-
-    //for i in 0..10 {
-        //let tx = tx.clone();
-
-        //thread::spawn(move || {
-            //let answer = i * i;
-
-            //tx.send(answer).unwrap();
-        //});
-    //}
-
-    //for _ in 0..10 {
-        //println!("{}", rx.recv().unwrap());
-    //}
 }
