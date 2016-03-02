@@ -3,16 +3,36 @@ use std::net::{TcpListener, TcpStream};
 use std::io::{Write, BufRead, BufReader};
 use std::sync::{Arc,Mutex};
 
-fn read_stream(reader: &mut BufReader<TcpStream>) -> Result<Vec<u8>,()> {
+enum Command<'a> {
+    Quit,
+    Inc,
+    Unknown(&'a str),
+}
+
+fn read_stream(reader: &mut BufReader<TcpStream>) -> Result<String,()> {
     let mut buffer = Vec::new();
     let result = reader.read_until(b';', &mut buffer);
 
     if result.is_err() {
         return Err(());
-    } else if buffer.last() != Some(&b';') {
+    }
+
+    if buffer.pop() != Some(b';') {
         return Err(());
-    } else {
-        return Ok(buffer);
+    }
+
+    let result = String::from_utf8(buffer);
+    match result {
+        Ok(str) => Ok(str),
+        Err(_) => Err(())
+    }
+}
+
+fn parse_cmd(buffer: &str) -> Command {
+    match buffer.trim() {
+        "increment" => Command::Inc,
+        "quit" => Command::Quit,
+        unknown => Command::Unknown(unknown)
     }
 }
 
@@ -24,12 +44,24 @@ fn handle_stream(stream: TcpStream, data: Arc<Mutex<u8>>) {
             break;
         }
 
-        let mut data = data.lock().unwrap();
-        *data += 1;
-
         let mut stream = reader.get_mut();
-        let _ = stream.write(format!("count {}\r\n",*data).as_bytes());
-        let _ = stream.flush();
+        match parse_cmd(&result.unwrap()) {
+            Command::Inc => {
+                let mut data = data.lock().unwrap();
+                *data += 1;
+                let _ = stream.write(format!("count {}\r\n",*data).as_bytes());
+                let _ = stream.flush();
+            }
+            Command::Quit => {
+                let _ = stream.write(b"Bye bye\r\n");
+                let _ = stream.flush();
+                break;
+            }
+            Command::Unknown(command) => {
+                let _ = stream.write(format!("Unkown command {}\r\n", command).as_bytes());
+                let _ = stream.flush();
+            }
+        }
     }
 }
 
