@@ -2,10 +2,12 @@ use std::thread;
 use std::net::{TcpListener, TcpStream};
 use std::io::{Write, BufRead, BufReader};
 use std::sync::{Arc,Mutex};
+use std::collections::LinkedList;
 
 enum Command<'a> {
     Quit,
-    Inc,
+    Push,
+    Pop,
     Unknown(&'a str),
 }
 
@@ -30,13 +32,14 @@ fn read_stream(reader: &mut BufReader<TcpStream>) -> Result<String,()> {
 
 fn parse_cmd(buffer: &str) -> Command {
     match buffer.trim() {
-        "increment" => Command::Inc,
+        "push" => Command::Push,
+        "pop" => Command::Pop,
         "quit" => Command::Quit,
         unknown => Command::Unknown(unknown)
     }
 }
 
-fn handle_stream(stream: TcpStream, data: Arc<Mutex<u8>>) {
+fn handle_stream(stream: TcpStream, data: Arc<Mutex<LinkedList<u8>>>) {
     let mut reader = BufReader::new(stream);
     loop {
         let result = read_stream(&mut reader);
@@ -46,11 +49,17 @@ fn handle_stream(stream: TcpStream, data: Arc<Mutex<u8>>) {
 
         let mut stream = reader.get_mut();
         match parse_cmd(&result.unwrap()) {
-            Command::Inc => {
+            Command::Push => {
                 let mut data = data.lock().unwrap();
-                *data += 1;
-                let _ = stream.write(format!("count {}\r\n",*data).as_bytes());
-                let _ = stream.flush();
+                data.push_back(1);
+                let _ = stream.write(b"SUCCESS\r\n");
+            }
+            Command::Pop => {
+                let mut data = data.lock().unwrap();
+                match data.pop_front() {
+                    Some(data) => { let _ = stream.write(format!("{}\r\n",data).as_bytes()); }
+                    None => { let _ = stream.write(b"FAILURE\r\n"); }
+                }
             }
             Command::Quit => {
                 let _ = stream.write(b"Bye bye\r\n");
@@ -59,16 +68,16 @@ fn handle_stream(stream: TcpStream, data: Arc<Mutex<u8>>) {
             }
             Command::Unknown(command) => {
                 let _ = stream.write(format!("Unkown command {}\r\n", command).as_bytes());
-                let _ = stream.flush();
             }
         }
+        let _ = stream.flush();
     }
 }
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:5248").unwrap();
 
-    let data = Arc::new(Mutex::new(0));
+    let data = Arc::new(Mutex::new(LinkedList::new()));
 
     for stream in listener.incoming() {
         match stream {
