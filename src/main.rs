@@ -1,17 +1,20 @@
 use std::thread;
 use std::net::{TcpListener, TcpStream};
-use std::io::{Write, Read};
+use std::io::{Write, BufRead, BufReader};
 use std::sync::{Arc,Mutex};
 
-fn handle_stream(mut stream: TcpStream, data: Arc<Mutex<u8>>) {
+fn handle_stream(stream: TcpStream, data: Arc<Mutex<u8>>) {
+    let mut reader = BufReader::new(stream);
+
     loop {
-        let mut buffer = [0; 10];
-        let _ = stream.read(&mut buffer);
+        let mut buffer = Vec::new();
+        let _ = reader.read_until(b';', &mut buffer);
 
         {
             let mut data = data.lock().unwrap();
             *data += 1;
 
+            let mut stream = reader.get_mut();
             let _ = stream.write(format!("{}",*data).as_bytes());
             let _ = stream.flush();
         }
