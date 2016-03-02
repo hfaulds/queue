@@ -8,16 +8,18 @@ fn handle_stream(stream: TcpStream, data: Arc<Mutex<u8>>) {
 
     loop {
         let mut buffer = Vec::new();
-        let _ = reader.read_until(b';', &mut buffer);
+        let result = reader.read_until(b';', &mut buffer);
 
-        {
-            let mut data = data.lock().unwrap();
-            *data += 1;
-
-            let mut stream = reader.get_mut();
-            let _ = stream.write(format!("{}",*data).as_bytes());
-            let _ = stream.flush();
+        if result.is_err() || buffer.last() != Some(&b';') {
+            break;
         }
+
+        let mut data = data.lock().unwrap();
+        *data += 1;
+
+        let mut stream = reader.get_mut();
+        let _ = stream.write(format!("count {}\r\n",*data).as_bytes());
+        let _ = stream.flush();
     }
 }
 
