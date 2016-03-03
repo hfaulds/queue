@@ -13,7 +13,8 @@ enum Command {
     Pop,
     BlockingPop,
     Begin,
-    Commit
+    Commit,
+    Abort
 }
 
 enum UncommittedCommand {
@@ -61,6 +62,7 @@ fn parse_cmd(buffer: &String) -> Result<Command,String> {
         "QUIT" => Ok(Command::Quit),
         "BEGIN" => Ok(Command::Begin),
         "COMMIT" => Ok(Command::Commit),
+        "ABORT" => Ok(Command::Abort),
         _ => Err(format!("Unknown Command: {}", cmd))
     }
 }
@@ -134,6 +136,14 @@ fn exec_cmd(
             } else {
                 uncommitted_cmds.push(UncommittedCommand::Begin);
                 return Ok(());
+            }
+        }
+        Command::Abort => {
+            if in_transaction {
+                rollback(uncommitted_cmds, data);
+                return Ok(());
+            } else {
+                let _ = writer.write(b"Already in transaction");
             }
         }
         Command::Commit => {
