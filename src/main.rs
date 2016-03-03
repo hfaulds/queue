@@ -32,9 +32,10 @@ fn read_stream(reader: &mut BufReader<TcpStream>) -> Result<String,()> {
 fn parse_cmd(buffer: &String) -> Result<Command,String> {
     let parts: Vec<&str> = buffer.trim().split(" ").collect();
     let cmd: &str = parts.first().unwrap();
+    let upcase_cmd: &str = &cmd.to_uppercase();
 
-    match cmd {
-        "push" => {
+    match upcase_cmd {
+        "PUSH" => {
             if parts.len() == 2 {
                 let arg = parts.last().unwrap();
                 Ok(Command::Push(arg))
@@ -42,9 +43,9 @@ fn parse_cmd(buffer: &String) -> Result<Command,String> {
                 Err("Too many arguments for PUSH".to_string())
             }
         }
-        "pop" => Ok(Command::Pop),
-        "quit" => Ok(Command::Quit),
-        unknown => Err(format!("Unknown Command: {}", unknown))
+        "POP" => Ok(Command::Pop),
+        "QUIT" => Ok(Command::Quit),
+        _ => Err(format!("Unknown Command: {}", cmd))
     }
 }
 
