@@ -6,7 +6,7 @@ use std::collections::LinkedList;
 
 enum Command<'a> {
     Quit,
-    Push,
+    Push(&'a str),
     Pop,
     Unknown(&'a str),
 }
@@ -30,16 +30,22 @@ fn read_stream(reader: &mut BufReader<TcpStream>) -> Result<String,()> {
     }
 }
 
-fn parse_cmd(buffer: &str) -> Command {
-    match buffer.trim() {
-        "push" => Command::Push,
+fn parse_cmd(buffer: &String) -> Command {
+    let parts: Vec<&str> = buffer.trim().split(" ").collect();
+    let cmd: &str = parts.first().unwrap();
+
+    match cmd {
+        "push" => {
+            let arg = parts.last().unwrap();
+            Command::Push(arg)
+        }
         "pop" => Command::Pop,
         "quit" => Command::Quit,
         unknown => Command::Unknown(unknown)
     }
 }
 
-fn handle_stream(stream: TcpStream, data: Arc<Mutex<LinkedList<u8>>>) {
+fn handle_stream(stream: TcpStream, data: Arc<Mutex<LinkedList<String>>>) {
     let mut reader = BufReader::new(stream);
     loop {
         let result = read_stream(&mut reader);
@@ -49,9 +55,9 @@ fn handle_stream(stream: TcpStream, data: Arc<Mutex<LinkedList<u8>>>) {
 
         let mut stream = reader.get_mut();
         match parse_cmd(&result.unwrap()) {
-            Command::Push => {
+            Command::Push(value) => {
                 let mut data = data.lock().unwrap();
-                data.push_back(1);
+                data.push_back(value.to_string());
                 let _ = stream.write(b"SUCCESS\r\n");
             }
             Command::Pop => {
