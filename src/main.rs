@@ -18,6 +18,7 @@ fn read_stream(reader: &mut BufReader<TcpStream>) -> Result<String,()> {
         return Err(());
     }
 
+    // EOF
     if buffer.pop() != Some(b';') {
         return Err(());
     }
@@ -49,39 +50,59 @@ fn parse_cmd(buffer: &String) -> Result<Command,String> {
     }
 }
 
+fn exec_cmd(writer: &mut TcpStream , cmd: Result<Command,String>, data: Arc<Mutex<LinkedList<String>>>) -> Result<(),()> {
+    let result = match cmd {
+        Ok(Command::Push(value)) => {
+            let mut data = data.lock().unwrap();
+            data.push_back(value.to_string());
+            let _ = writer.write(b"SUCCESS");
+            Ok(())
+        }
+        Ok(Command::Pop) => {
+            let mut data = data.lock().unwrap();
+            match data.pop_front() {
+                Some(data) => {
+                    let _ = writer.write(format!("{}",data).as_bytes());
+                }
+                None => {
+                    let _ = writer.write(b"FAILURE");
+                }
+            }
+            Ok(())
+        }
+        Ok(Command::Quit) => {
+            let _ = writer.write(b"Bye bye");
+            Err(())
+        }
+        Err(message) => {
+            let _ = writer.write(message.as_bytes());
+            Ok(())
+        }
+    };
+    let _ = writer.write(b"\r\n");
+    let _ = writer.flush();
+    return result;
+}
+
 fn handle_stream(stream: TcpStream, data: Arc<Mutex<LinkedList<String>>>) {
     let mut reader = BufReader::new(stream);
     loop {
         let result = read_stream(&mut reader);
-        if result.is_err() {
-            break;
-        }
-
-        let mut stream = reader.get_mut();
-        match parse_cmd(&result.unwrap()) {
-            Ok(Command::Push(value)) => {
-                let mut data = data.lock().unwrap();
-                data.push_back(value.to_string());
-                let _ = stream.write(b"SUCCESS");
-            }
-            Ok(Command::Pop) => {
-                let mut data = data.lock().unwrap();
-                match data.pop_front() {
-                    Some(data) => { let _ = stream.write(format!("{}",data).as_bytes()); }
-                    None => { let _ = stream.write(b"FAILURE"); }
+        match result {
+            Ok(result) => {
+                // TODO: Use a BufWriter
+                //let mut writer = BufWriter::new(stream);
+                let mut writer = reader.get_mut();
+                let cmd = parse_cmd(&result);
+                let result = exec_cmd(&mut writer, cmd, data.clone());
+                if result.is_err() {
+                    break;
                 }
             }
-            Ok(Command::Quit) => {
-                let _ = stream.write(b"Bye bye\r\n");
-                let _ = stream.flush();
+            Err(_) => {
                 break;
             }
-            Err(message) => {
-                let _ = stream.write(message.as_bytes());
-            }
         }
-        let _ = stream.write(b"\r\n");
-        let _ = stream.flush();
     }
 }
 
