@@ -93,25 +93,16 @@ fn exec_cmd(
     data: Arc<Mutex<LinkedList<String>>>
     ) -> Result<(),()> {
 
-    let in_transaction = uncommitted_cmds.len() > 0;
-
     match cmd {
         Command::Push(value) => {
-            if in_transaction {
-                uncommitted_cmds.push(UncommittedCommand::Push(value));
-            } else {
-                exec_push(value, data);
-                let _ = writer.write(b"SUCCESS");
-            }
+            exec_push(value, data);
+            let _ = writer.write(b"SUCCESS");
         }
         Command::Pop => {
             let mut data = data.lock().unwrap();
             match data.pop_front() {
                 Some(data) => {
                     let _ = writer.write(format!("{}",data).as_bytes());
-                    if in_transaction {
-                        uncommitted_cmds.push(UncommittedCommand::Pop(data));
-                    }
                 }
                 None => {
                     let _ = writer.write(b"FAILURE");
@@ -121,9 +112,6 @@ fn exec_cmd(
         Command::BlockingPop => {
             let data = exec_blocking_pop(data);
             let _ = writer.write(format!("{}",data).as_bytes());
-            if in_transaction {
-                uncommitted_cmds.push(UncommittedCommand::Pop(data));
-            }
         }
         Command::Quit => {
             let _ = writer.write(b"Bye bye");
@@ -131,20 +119,61 @@ fn exec_cmd(
             return Err(());
         }
         Command::Begin => {
-            if in_transaction {
-                let _ = writer.write(b"Already in transaction");
-            } else {
-                uncommitted_cmds.push(UncommittedCommand::Begin);
-                return Ok(());
-            }
+            uncommitted_cmds.push(UncommittedCommand::Begin);
+            return Ok(());
         }
         Command::Abort => {
-            if in_transaction {
-                rollback(uncommitted_cmds, data);
-                return Ok(());
-            } else {
-                let _ = writer.write(b"Already in transaction");
+            let _ = writer.write(b"Not in transaction");
+        }
+        Command::Commit => {
+            let _ = writer.write(b"Not in transaction");
+        }
+    };
+
+    let _ = writer.write(b"\r\n");
+    let _ = writer.flush();
+    Ok(())
+}
+
+fn exec_cmd_in_transaction(
+    writer: &mut BufWriter<&TcpStream>,
+    cmd: Command,
+    uncommitted_cmds: &mut Vec<UncommittedCommand>,
+    data: Arc<Mutex<LinkedList<String>>>
+    ) -> Result<(),()> {
+
+    match cmd {
+        Command::Push(value) => {
+            uncommitted_cmds.push(UncommittedCommand::Push(value));
+        }
+        Command::Pop => {
+            let mut data = data.lock().unwrap();
+            match data.pop_front() {
+                Some(data) => {
+                    let _ = writer.write(format!("{}",data).as_bytes());
+                    uncommitted_cmds.push(UncommittedCommand::Pop(data));
+                }
+                None => {
+                    let _ = writer.write(b"FAILURE");
+                }
             }
+        }
+        Command::BlockingPop => {
+            let data = exec_blocking_pop(data);
+            let _ = writer.write(format!("{}",data).as_bytes());
+            uncommitted_cmds.push(UncommittedCommand::Pop(data));
+        }
+        Command::Quit => {
+            let _ = writer.write(b"Bye bye");
+            let _ = writer.flush();
+            return Err(());
+        }
+        Command::Begin => {
+            let _ = writer.write(b"Already in transaction");
+        }
+        Command::Abort => {
+            rollback(uncommitted_cmds, data);
+            return Ok(());
         }
         Command::Commit => {
             for cmd in uncommitted_cmds.drain(1..) {
@@ -189,7 +218,11 @@ fn handle_stream(stream: &TcpStream, data: Arc<Mutex<LinkedList<String>>>) {
                 let cmd = parse_cmd(&result);
                 match cmd {
                     Ok(cmd) => {
-                        let result = exec_cmd(&mut writer, cmd, &mut uncommitted_cmds, data.clone());
+                        let result = if uncommitted_cmds.len() > 1{
+                            exec_cmd(&mut writer, cmd, &mut uncommitted_cmds, data.clone())
+                        } else {
+                            exec_cmd_in_transaction(&mut writer, cmd, &mut uncommitted_cmds, data.clone())
+                        };
                         if result.is_err() {
                             rollback(&mut uncommitted_cmds, data);
                             break;
