@@ -10,8 +10,7 @@ enum Command<'a> {
     Pop,
 }
 
-fn read_stream(stream: &TcpStream) -> Result<String,()> {
-    let mut reader = BufReader::new(stream);
+fn read_stream(reader: &mut BufReader<&TcpStream>) -> Result<String,()> {
     let mut buffer = Vec::new();
     let result = reader.read_until(b';', &mut buffer);
 
@@ -51,8 +50,7 @@ fn parse_cmd(buffer: &String) -> Result<Command,String> {
     }
 }
 
-fn exec_cmd(stream: &TcpStream , cmd: Result<Command,String>, data: Arc<Mutex<LinkedList<String>>>) -> Result<(),()> {
-    let mut writer = BufWriter::new(stream);
+fn exec_cmd(writer: &mut BufWriter<&TcpStream>, cmd: Result<Command,String>, data: Arc<Mutex<LinkedList<String>>>) -> Result<(),()> {
     match cmd {
         Ok(Command::Push(value)) => {
             let mut data = data.lock().unwrap();
@@ -84,12 +82,14 @@ fn exec_cmd(stream: &TcpStream , cmd: Result<Command,String>, data: Arc<Mutex<Li
 }
 
 fn handle_stream(stream: &TcpStream, data: Arc<Mutex<LinkedList<String>>>) {
+    let mut reader = BufReader::new(stream);
+    let mut writer = BufWriter::new(stream);
     loop {
-        let result = read_stream(&stream);
+        let result = read_stream(&mut reader);
         match result {
             Ok(result) => {
                 let cmd = parse_cmd(&result);
-                let result = exec_cmd(&stream, cmd, data.clone());
+                let result = exec_cmd(&mut writer, cmd, data.clone());
                 if result.is_err() {
                     break;
                 }
