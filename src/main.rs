@@ -3,11 +3,15 @@ use std::net::{TcpListener, TcpStream};
 use std::io::{Write, BufWriter, BufRead, BufReader};
 use std::sync::{Arc,Mutex};
 use std::collections::LinkedList;
+use std::time::Duration;
+
+const BLOCKING_POP_POLLING_FREQ:u64 = 100;
 
 enum Command<'a> {
     Quit,
     Push(&'a str),
     Pop,
+    BlockingPop,
 }
 
 fn read_stream(reader: &mut BufReader<&TcpStream>) -> Result<String,()> {
@@ -45,8 +49,23 @@ fn parse_cmd(buffer: &String) -> Result<Command,String> {
             }
         }
         "POP" => Ok(Command::Pop),
+        "BPOP" => Ok(Command::BlockingPop),
         "QUIT" => Ok(Command::Quit),
         _ => Err(format!("Unknown Command: {}", cmd))
+    }
+}
+
+fn exec_blocking_pop(data: Arc<Mutex<LinkedList<String>>>) -> String {
+    loop {
+        let mut data = data.lock().unwrap();
+        match data.pop_front() {
+            Some(data) => {
+                return data;
+            }
+            None => {
+            }
+        }
+        std::thread::sleep(Duration::from_millis(BLOCKING_POP_POLLING_FREQ));
     }
 }
 
@@ -67,6 +86,10 @@ fn exec_cmd(writer: &mut BufWriter<&TcpStream>, cmd: Result<Command,String>, dat
                     let _ = writer.write(b"FAILURE");
                 }
             }
+        }
+        Ok(Command::BlockingPop) => {
+            let data = exec_blocking_pop(data);
+            let _ = writer.write(format!("{}",data).as_bytes());
         }
         Ok(Command::Quit) => {
             let _ = writer.write(b"Bye bye");
