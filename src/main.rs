@@ -8,7 +8,6 @@ enum Command<'a> {
     Quit,
     Push(&'a str),
     Pop,
-    Unknown(&'a str),
 }
 
 fn read_stream(reader: &mut BufReader<TcpStream>) -> Result<String,()> {
@@ -30,18 +29,22 @@ fn read_stream(reader: &mut BufReader<TcpStream>) -> Result<String,()> {
     }
 }
 
-fn parse_cmd(buffer: &String) -> Command {
+fn parse_cmd(buffer: &String) -> Result<Command,String> {
     let parts: Vec<&str> = buffer.trim().split(" ").collect();
     let cmd: &str = parts.first().unwrap();
 
     match cmd {
         "push" => {
-            let arg = parts.last().unwrap();
-            Command::Push(arg)
+            if parts.len() == 2 {
+                let arg = parts.last().unwrap();
+                Ok(Command::Push(arg))
+            } else {
+                Err("Too many arguments for PUSH".to_string())
+            }
         }
-        "pop" => Command::Pop,
-        "quit" => Command::Quit,
-        unknown => Command::Unknown(unknown)
+        "pop" => Ok(Command::Pop),
+        "quit" => Ok(Command::Quit),
+        unknown => Err(format!("Unknown Command: {}", unknown))
     }
 }
 
@@ -55,27 +58,28 @@ fn handle_stream(stream: TcpStream, data: Arc<Mutex<LinkedList<String>>>) {
 
         let mut stream = reader.get_mut();
         match parse_cmd(&result.unwrap()) {
-            Command::Push(value) => {
+            Ok(Command::Push(value)) => {
                 let mut data = data.lock().unwrap();
                 data.push_back(value.to_string());
-                let _ = stream.write(b"SUCCESS\r\n");
+                let _ = stream.write(b"SUCCESS");
             }
-            Command::Pop => {
+            Ok(Command::Pop) => {
                 let mut data = data.lock().unwrap();
                 match data.pop_front() {
-                    Some(data) => { let _ = stream.write(format!("{}\r\n",data).as_bytes()); }
-                    None => { let _ = stream.write(b"FAILURE\r\n"); }
+                    Some(data) => { let _ = stream.write(format!("{}",data).as_bytes()); }
+                    None => { let _ = stream.write(b"FAILURE"); }
                 }
             }
-            Command::Quit => {
+            Ok(Command::Quit) => {
                 let _ = stream.write(b"Bye bye\r\n");
                 let _ = stream.flush();
                 break;
             }
-            Command::Unknown(command) => {
-                let _ = stream.write(format!("Unkown command {}\r\n", command).as_bytes());
+            Err(message) => {
+                let _ = stream.write(message.as_bytes());
             }
         }
+        let _ = stream.write(b"\r\n");
         let _ = stream.flush();
     }
 }
