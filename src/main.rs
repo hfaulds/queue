@@ -1,6 +1,6 @@
 use std::thread;
 use std::net::{TcpListener, TcpStream};
-use std::io::{Write, BufRead, BufReader};
+use std::io::{Write, BufWriter, BufRead, BufReader};
 use std::sync::{Arc,Mutex};
 use std::collections::LinkedList;
 
@@ -10,7 +10,8 @@ enum Command<'a> {
     Pop,
 }
 
-fn read_stream(reader: &mut BufReader<TcpStream>) -> Result<String,()> {
+fn read_stream(stream: &TcpStream) -> Result<String,()> {
+    let mut reader = BufReader::new(stream);
     let mut buffer = Vec::new();
     let result = reader.read_until(b';', &mut buffer);
 
@@ -50,13 +51,13 @@ fn parse_cmd(buffer: &String) -> Result<Command,String> {
     }
 }
 
-fn exec_cmd(writer: &mut TcpStream , cmd: Result<Command,String>, data: Arc<Mutex<LinkedList<String>>>) -> Result<(),()> {
-    let result = match cmd {
+fn exec_cmd(stream: &TcpStream , cmd: Result<Command,String>, data: Arc<Mutex<LinkedList<String>>>) -> Result<(),()> {
+    let mut writer = BufWriter::new(stream);
+    match cmd {
         Ok(Command::Push(value)) => {
             let mut data = data.lock().unwrap();
             data.push_back(value.to_string());
             let _ = writer.write(b"SUCCESS");
-            Ok(())
         }
         Ok(Command::Pop) => {
             let mut data = data.lock().unwrap();
@@ -68,33 +69,27 @@ fn exec_cmd(writer: &mut TcpStream , cmd: Result<Command,String>, data: Arc<Mute
                     let _ = writer.write(b"FAILURE");
                 }
             }
-            Ok(())
         }
         Ok(Command::Quit) => {
             let _ = writer.write(b"Bye bye");
-            Err(())
+            return Err(());
         }
         Err(message) => {
             let _ = writer.write(message.as_bytes());
-            Ok(())
         }
     };
     let _ = writer.write(b"\r\n");
     let _ = writer.flush();
-    return result;
+    Ok(())
 }
 
-fn handle_stream(stream: TcpStream, data: Arc<Mutex<LinkedList<String>>>) {
-    let mut reader = BufReader::new(stream);
+fn handle_stream(stream: &TcpStream, data: Arc<Mutex<LinkedList<String>>>) {
     loop {
-        let result = read_stream(&mut reader);
+        let result = read_stream(&stream);
         match result {
             Ok(result) => {
-                // TODO: Use a BufWriter
-                //let mut writer = BufWriter::new(stream);
-                let mut writer = reader.get_mut();
                 let cmd = parse_cmd(&result);
-                let result = exec_cmd(&mut writer, cmd, data.clone());
+                let result = exec_cmd(&stream, cmd, data.clone());
                 if result.is_err() {
                     break;
                 }
@@ -116,7 +111,7 @@ fn main() {
             Ok(stream) => {
                 let data = data.clone();
                 thread::spawn(move|| {
-                    handle_stream(stream, data);
+                    handle_stream(&stream, data);
                 });
             }
             Err(_) => {
