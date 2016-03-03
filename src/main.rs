@@ -70,6 +70,7 @@ fn exec_cmd(writer: &mut BufWriter<&TcpStream>, cmd: Result<Command,String>, dat
         }
         Ok(Command::Quit) => {
             let _ = writer.write(b"Bye bye");
+            let _ = writer.flush();
             return Err(());
         }
         Err(message) => {
