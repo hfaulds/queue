@@ -99,15 +99,7 @@ fn exec_cmd(
             let _ = writer.write(b"SUCCESS\r\n");
         }
         Command::Pop => {
-            let mut data = data.lock().unwrap();
-            match data.pop_front() {
-                Some(data) => {
-                    let _ = writer.write(format!("{}\r\n",data).as_bytes());
-                }
-                None => {
-                    let _ = writer.write(b"FAILURE\r\n");
-                }
-            }
+            let _ = exec_pop(writer, data);
         }
         Command::BlockingPop => {
             let data = exec_blocking_pop(data);
@@ -133,6 +125,20 @@ fn exec_cmd(
     Ok(())
 }
 
+fn exec_pop(writer: &mut BufWriter<&TcpStream>, data: Arc<Mutex<LinkedList<String>>>) -> Result<(String),()> {
+    let mut data = data.lock().unwrap();
+    match data.pop_front() {
+        Some(data) => {
+            let _ = writer.write(format!("{}\r\n", data).as_bytes());
+            Ok(data)
+        }
+        None => {
+            let _ = writer.write(b"FAILURE\r\n");
+            Err(())
+        }
+    }
+}
+
 fn exec_cmd_in_transaction(
     writer: &mut BufWriter<&TcpStream>,
     cmd: Command,
@@ -145,15 +151,9 @@ fn exec_cmd_in_transaction(
             uncommitted_cmds.push(UncommittedCommand::Push(value));
         }
         Command::Pop => {
-            let mut data = data.lock().unwrap();
-            match data.pop_front() {
-                Some(data) => {
-                    let _ = writer.write(format!("{}\r\n",data).as_bytes());
-                    uncommitted_cmds.push(UncommittedCommand::Pop(data));
-                }
-                None => {
-                    let _ = writer.write(b"FAILURE\r\n");
-                }
+            let result = exec_pop(writer, data);
+            if result.is_ok() {
+                uncommitted_cmds.push(UncommittedCommand::Pop(result.unwrap()));
             }
         }
         Command::BlockingPop => {
