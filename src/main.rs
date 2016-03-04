@@ -230,6 +230,8 @@ fn handle_stream(stream: &TcpStream, data: Arc<Mutex<LinkedList<String>>>) {
                     }
                     Err(message) => {
                         let _ = writer.write(message.as_bytes());
+                        let _ = writer.write(b"\r\n");
+                        let _ = writer.flush();
                     }
                 }
             }
