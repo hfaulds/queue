@@ -23,7 +23,7 @@ enum UncommittedCommand {
     Pop(String),
 }
 
-fn read_stream(reader: &mut BufReader<&TcpStream>) -> Result<String,()> {
+fn read_stream(reader: &mut BufReader<&TcpStream>) -> Result<Vec<u8>,()> {
     let mut buffer = Vec::new();
     let result = reader.read_until(b';', &mut buffer);
 
@@ -36,34 +36,38 @@ fn read_stream(reader: &mut BufReader<&TcpStream>) -> Result<String,()> {
         return Err(());
     }
 
-    let result = String::from_utf8(buffer);
-    match result {
-        Ok(str) => Ok(str),
-        Err(_) => Err(())
-    }
+    return Ok(buffer);
 }
 
-fn parse_cmd(buffer: &String) -> Result<Command,String> {
-    let parts: Vec<&str> = buffer.trim().split(" ").collect();
-    let cmd: &str = parts.first().unwrap();
-    let upcase_cmd: &str = &cmd.to_uppercase();
+fn parse_cmd(buffer: Vec<u8>) -> Result<Command,String> {
+    let result = String::from_utf8(buffer);
+    match result {
+        Ok(buffer) => {
+            let parts: Vec<&str> = buffer.trim().split(" ").collect();
+            let cmd: &str = parts.first().unwrap();
+            let upcase_cmd: &str = &cmd.to_uppercase();
 
-    match upcase_cmd {
-        "PUSH" => {
-            if parts.len() == 2 {
-                let arg = (*parts.last().unwrap()).to_string();
-                Ok(Command::Push(arg))
-            } else {
-                Err("Too many arguments for PUSH".to_string())
+            match upcase_cmd {
+                "PUSH" => {
+                    if parts.len() == 2 {
+                        let arg = (*parts.last().unwrap()).to_string();
+                        Ok(Command::Push(arg))
+                    } else {
+                        Err("Too many arguments for PUSH".to_string())
+                    }
+                }
+                "POP" => Ok(Command::Pop),
+                "BPOP" => Ok(Command::BlockingPop),
+                "QUIT" => Ok(Command::Quit),
+                "BEGIN" => Ok(Command::Begin),
+                "COMMIT" => Ok(Command::Commit),
+                "ABORT" => Ok(Command::Abort),
+                _ => Err(format!("Unknown Command: {}", cmd))
             }
         }
-        "POP" => Ok(Command::Pop),
-        "BPOP" => Ok(Command::BlockingPop),
-        "QUIT" => Ok(Command::Quit),
-        "BEGIN" => Ok(Command::Begin),
-        "COMMIT" => Ok(Command::Commit),
-        "ABORT" => Ok(Command::Abort),
-        _ => Err(format!("Unknown Command: {}", cmd))
+        Err(_) => {
+            return Err("Command included non utf8 characters".to_string());
+        }
     }
 }
 
@@ -214,7 +218,7 @@ fn handle_stream(stream: &TcpStream, data: Arc<Mutex<LinkedList<String>>>) {
         let result = read_stream(&mut reader);
         match result {
             Ok(result) => {
-                let cmd = parse_cmd(&result);
+                let cmd = parse_cmd(result);
                 match cmd {
                     Ok(cmd) => {
                         let in_transaction = uncommitted_cmds.len();
