@@ -2,7 +2,6 @@ use std::thread;
 use std::net::{TcpListener, TcpStream};
 use std::io::{Write, BufWriter, BufRead, BufReader};
 use std::sync::{Arc,Mutex};
-use std::collections::LinkedList;
 use std::time::Duration;
 
 const BLOCKING_POP_POLLING_FREQ:u64 = 100;
@@ -71,10 +70,10 @@ fn parse_cmd(buffer: Vec<u8>) -> Result<Command,String> {
     }
 }
 
-fn exec_blocking_pop(data: Arc<Mutex<LinkedList<String>>>) -> String {
+fn exec_blocking_pop(data: Arc<Mutex<Vec<String>>>) -> String {
     loop {
         let mut data = data.lock().unwrap();
-        match data.pop_front() {
+        match data.pop() {
             Some(data) => {
                 return data;
             }
@@ -85,16 +84,16 @@ fn exec_blocking_pop(data: Arc<Mutex<LinkedList<String>>>) -> String {
     }
 }
 
-fn exec_push(value: String, data: Arc<Mutex<LinkedList<String>>>) {
+fn exec_push(value: String, data: Arc<Mutex<Vec<String>>>) {
     let mut data = data.lock().unwrap();
-    data.push_back(value.to_string());
+    data.push(value.to_string());
 }
 
 fn exec_cmd(
     writer: &mut BufWriter<&TcpStream>,
     cmd: Command,
     uncommitted_cmds: &mut Vec<UncommittedCommand>,
-    data: Arc<Mutex<LinkedList<String>>>
+    data: Arc<Mutex<Vec<String>>>
     ) -> Result<(),()> {
 
     match cmd {
@@ -129,9 +128,9 @@ fn exec_cmd(
     Ok(())
 }
 
-fn exec_pop(writer: &mut BufWriter<&TcpStream>, data: Arc<Mutex<LinkedList<String>>>) -> Result<(String),()> {
+fn exec_pop(writer: &mut BufWriter<&TcpStream>, data: Arc<Mutex<Vec<String>>>) -> Result<(String),()> {
     let mut data = data.lock().unwrap();
-    match data.pop_front() {
+    match data.pop() {
         Some(data) => {
             let _ = writer.write(format!("{}\r\n", data).as_bytes());
             Ok(data)
@@ -147,7 +146,7 @@ fn exec_cmd_in_transaction(
     writer: &mut BufWriter<&TcpStream>,
     cmd: Command,
     uncommitted_cmds: &mut Vec<UncommittedCommand>,
-    data: Arc<Mutex<LinkedList<String>>>
+    data: Arc<Mutex<Vec<String>>>
     ) -> Result<(),()> {
 
     match cmd {
@@ -184,7 +183,7 @@ fn exec_cmd_in_transaction(
     Ok(())
 }
 
-fn rollback(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Arc<Mutex<LinkedList<String>>>) {
+fn rollback(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Arc<Mutex<Vec<String>>>) {
     for cmd in uncommitted_cmds.drain(..) {
         match cmd {
             UncommittedCommand::Pop(value) => {
@@ -196,7 +195,7 @@ fn rollback(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Arc<Mutex<Link
     }
 }
 
-fn commit(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Arc<Mutex<LinkedList<String>>>) {
+fn commit(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Arc<Mutex<Vec<String>>>) {
     for cmd in uncommitted_cmds.drain(..) {
         match cmd {
             UncommittedCommand::Push(value) => {
@@ -208,11 +207,11 @@ fn commit(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Arc<Mutex<Linked
     }
 }
 
-fn handle_stream(stream: &TcpStream, data: Arc<Mutex<LinkedList<String>>>) {
+fn handle_stream(stream: &TcpStream, data: Arc<Mutex<Vec<String>>>) {
     let mut reader = BufReader::new(stream);
     let mut writer = BufWriter::new(stream);
 
-    let mut uncommitted_cmds: Vec<UncommittedCommand > = Vec::new();
+    let mut uncommitted_cmds: Vec<UncommittedCommand> = Vec::new();
 
     loop {
         let result = read_stream(&mut reader);
@@ -250,7 +249,7 @@ fn handle_stream(stream: &TcpStream, data: Arc<Mutex<LinkedList<String>>>) {
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:5248").unwrap();
 
-    let data = Arc::new(Mutex::new(LinkedList::new()));
+    let data = Arc::new(Mutex::new(Vec::new()));
 
     for stream in listener.incoming() {
         match stream {
