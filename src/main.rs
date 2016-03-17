@@ -1,18 +1,21 @@
 use std::thread;
 use std::net::{TcpListener, TcpStream};
 use std::io::{Write, BufWriter, BufRead, BufReader};
-use std::sync::{Arc,Mutex};
+use std::sync::{Arc,Mutex,RwLock};
 use std::time::Duration;
+use std::collections::HashMap;
 
 const BLOCKING_POP_POLLING_FREQ:u64 = 100;
 
 type Queue = Arc<Mutex<Vec<String>>>;
+type QueueName = String;
+type QueueTable = Arc<RwLock<HashMap<QueueName, Queue>>>;
 
 enum Command {
     Quit,
-    Push(String),
-    Pop,
-    BlockingPop,
+    Push(String, QueueName),
+    Pop(QueueName),
+    BlockingPop(QueueName),
     Begin,
     Commit,
     Abort
@@ -20,8 +23,8 @@ enum Command {
 
 enum UncommittedCommand {
     Begin,
-    Push(String),
-    Pop(String),
+    Push(String, QueueName),
+    Pop(String, QueueName),
 }
 
 fn read_stream(reader: &mut BufReader<&TcpStream>) -> Result<Vec<u8>,()> {
@@ -50,15 +53,30 @@ fn parse_cmd(buffer: Vec<u8>) -> Result<Command,String> {
 
             match upcase_cmd {
                 "PUSH" => {
-                    if parts.len() == 2 {
-                        let arg = (*parts.last().unwrap()).to_string();
-                        Ok(Command::Push(arg))
+                    if parts.len() == 3 {
+                        let data = (*parts[1]).to_string();
+                        let queue_name = (*parts.last().unwrap()).to_string();
+                        Ok(Command::Push(data, queue_name))
                     } else {
-                        Err("Too many arguments for PUSH".to_string())
+                        Err("Incorrect number of arguments for PUSH".to_string())
                     }
                 }
-                "POP" => Ok(Command::Pop),
-                "BPOP" => Ok(Command::BlockingPop),
+                "POP" => {
+                    if parts.len() == 2 {
+                        let queue_name = (*parts.last().unwrap()).to_string();
+                        Ok(Command::Pop(queue_name))
+                    } else {
+                        Err("Incorrect number of arguments for PUSH".to_string())
+                    }
+                }
+                "BPOP" => {
+                    if parts.len() == 2 {
+                        let queue_name = (*parts.last().unwrap()).to_string();
+                        Ok(Command::BlockingPop(queue_name))
+                    } else {
+                        Err("Incorrect number of arguments for PUSH".to_string())
+                    }
+                }
                 "QUIT" => Ok(Command::Quit),
                 "BEGIN" => Ok(Command::Begin),
                 "COMMIT" => Ok(Command::Commit),
@@ -72,10 +90,34 @@ fn parse_cmd(buffer: Vec<u8>) -> Result<Command,String> {
     }
 }
 
-fn exec_blocking_pop(data: Queue) -> String {
+fn exec_pop(writer: &mut BufWriter<&TcpStream>, queue_table: QueueTable, queue_name: QueueName) -> Result<(String),()> {
+    match queue_table.read().unwrap().get(&queue_name) {
+        Some(queue)  => {
+            let mut queue = queue.lock().unwrap();
+            match queue.pop() {
+                Some(data) => {
+                    let _ = writer.write(format!("{}\r\n", data).as_bytes());
+                    Ok(data)
+                }
+                None => {
+                    let _ = writer.write(b"NO DATA\r\n");
+                    Err(())
+                }
+            }
+        }
+        None => {
+            let _ = writer.write(b"NO SUCH QUEUE\r\n");
+            Err(())
+        }
+    }
+}
+
+
+fn exec_blocking_pop(queue_table: QueueTable, queue_name: QueueName) -> String {
+    let queue = get_or_create_queue(queue_table, queue_name);
     loop {
-        let mut data = data.lock().unwrap();
-        match data.pop() {
+        let mut queue = queue.lock().unwrap();
+        match queue.pop() {
             Some(data) => {
                 return data;
             }
@@ -86,29 +128,50 @@ fn exec_blocking_pop(data: Queue) -> String {
     }
 }
 
-fn exec_push(value: String, data: Queue) {
-    let mut data = data.lock().unwrap();
-    data.push(value.to_string());
+fn exec_push(value: String, queue_table: QueueTable, queue_name: QueueName) {
+    let queue = get_or_create_queue(queue_table, queue_name);
+    let mut queue = queue.lock().unwrap();
+    queue.push(value.to_string());
+}
+
+fn get_or_create_queue(queue_table: QueueTable, queue_name: QueueName) -> Queue {
+    {
+        let read_lock = queue_table.read().unwrap();
+        let result =  read_lock.get(&queue_name);
+        if result.is_some() {
+            return result.unwrap().clone();
+        }
+    }
+    let mut write_lock = queue_table.write().unwrap();
+    {
+        let result = write_lock.get(&queue_name);
+        if result.is_some() {
+            return result.unwrap().clone();
+        }
+    }
+    let queue = Arc::new(Mutex::new(Vec::new()));
+    write_lock.insert(queue_name, queue.clone());
+    return queue;
 }
 
 fn exec_cmd(
     writer: &mut BufWriter<&TcpStream>,
     cmd: Command,
     uncommitted_cmds: &mut Vec<UncommittedCommand>,
-    data: Queue
+    queue_table: QueueTable
     ) -> Result<(),()> {
 
     match cmd {
-        Command::Push(value) => {
-            exec_push(value, data);
+        Command::Push(value, queue_name) => {
+            exec_push(value, queue_table, queue_name);
             let _ = writer.write(b"SUCCESS\r\n");
         }
-        Command::Pop => {
-            let _ = exec_pop(writer, data);
+        Command::Pop(queue_name) => {
+            let _ = exec_pop(writer, queue_table, queue_name);
         }
-        Command::BlockingPop => {
-            let data = exec_blocking_pop(data);
-            let _ = writer.write(format!("{}",data).as_bytes());
+        Command::BlockingPop(queue_name) => {
+            let queue_table = exec_blocking_pop(queue_table, queue_name);
+            let _ = writer.write(format!("{}",queue_table).as_bytes());
         }
         Command::Quit => {
             let _ = writer.write(b"Bye bye");
@@ -130,41 +193,27 @@ fn exec_cmd(
     Ok(())
 }
 
-fn exec_pop(writer: &mut BufWriter<&TcpStream>, data: Queue) -> Result<(String),()> {
-    let mut data = data.lock().unwrap();
-    match data.pop() {
-        Some(data) => {
-            let _ = writer.write(format!("{}\r\n", data).as_bytes());
-            Ok(data)
-        }
-        None => {
-            let _ = writer.write(b"FAILURE\r\n");
-            Err(())
-        }
-    }
-}
-
 fn exec_cmd_in_transaction(
     writer: &mut BufWriter<&TcpStream>,
     cmd: Command,
     uncommitted_cmds: &mut Vec<UncommittedCommand>,
-    data: Queue
+    queue_table: QueueTable
     ) -> Result<(),()> {
 
     match cmd {
-        Command::Push(value) => {
-            uncommitted_cmds.push(UncommittedCommand::Push(value));
+        Command::Push(value, queue_name) => {
+            uncommitted_cmds.push(UncommittedCommand::Push(value, queue_name));
         }
-        Command::Pop => {
-            let result = exec_pop(writer, data);
-            if result.is_ok() {
-                uncommitted_cmds.push(UncommittedCommand::Pop(result.unwrap()));
+        Command::Pop(queue_name) => {
+            let data = exec_pop(writer, queue_table, queue_name.clone());
+            if data.is_ok() {
+                uncommitted_cmds.push(UncommittedCommand::Pop(data.unwrap(), queue_name));
             }
         }
-        Command::BlockingPop => {
-            let data = exec_blocking_pop(data);
+        Command::BlockingPop(queue_name) => {
+            let data = exec_blocking_pop(queue_table, queue_name.clone());
             let _ = writer.write(format!("{}",data).as_bytes());
-            uncommitted_cmds.push(UncommittedCommand::Pop(data));
+            uncommitted_cmds.push(UncommittedCommand::Pop(data, queue_name));
         }
         Command::Quit => {
             let _ = writer.write(b"Bye bye");
@@ -175,21 +224,21 @@ fn exec_cmd_in_transaction(
             let _ = writer.write(b"Already in transaction\r\n");
         }
         Command::Abort => {
-            rollback(uncommitted_cmds, data);
+            rollback(uncommitted_cmds, queue_table);
         }
         Command::Commit => {
-            commit(uncommitted_cmds, data);
+            commit(uncommitted_cmds, queue_table);
         }
     };
     let _ = writer.flush();
     Ok(())
 }
 
-fn rollback(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Queue) {
+fn rollback(uncommitted_cmds: &mut Vec<UncommittedCommand>, queue_table: QueueTable) {
     for cmd in uncommitted_cmds.drain(..) {
         match cmd {
-            UncommittedCommand::Pop(value) => {
-                exec_push(value, data.clone());
+            UncommittedCommand::Pop(value, queue_name) => {
+                exec_push(value, queue_table.clone(), queue_name);
             },
             _ => {
             }
@@ -197,11 +246,11 @@ fn rollback(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Queue) {
     }
 }
 
-fn commit(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Queue) {
+fn commit(uncommitted_cmds: &mut Vec<UncommittedCommand>, queue_table: QueueTable) {
     for cmd in uncommitted_cmds.drain(..) {
         match cmd {
-            UncommittedCommand::Push(value) => {
-                exec_push(value, data.clone());
+            UncommittedCommand::Push(value, queue_name) => {
+                exec_push(value, queue_table.clone(), queue_name);
             }
             _ => {
             }
@@ -209,7 +258,7 @@ fn commit(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Queue) {
     }
 }
 
-fn handle_stream(stream: &TcpStream, queue: Queue) {
+fn handle_stream(stream: &TcpStream, queue_table: QueueTable) {
     let mut reader = BufReader::new(stream);
     let mut writer = BufWriter::new(stream);
 
@@ -224,12 +273,12 @@ fn handle_stream(stream: &TcpStream, queue: Queue) {
                     Ok(cmd) => {
                         let in_transaction = uncommitted_cmds.len();
                         let result = if in_transaction > 0 {
-                            exec_cmd_in_transaction(&mut writer, cmd, &mut uncommitted_cmds, queue.clone())
+                            exec_cmd_in_transaction(&mut writer, cmd, &mut uncommitted_cmds, queue_table.clone())
                         } else {
-                            exec_cmd(&mut writer, cmd, &mut uncommitted_cmds, queue.clone())
+                            exec_cmd(&mut writer, cmd, &mut uncommitted_cmds, queue_table.clone())
                         };
                         if result.is_err() {
-                            rollback(&mut uncommitted_cmds, queue);
+                            rollback(&mut uncommitted_cmds, queue_table);
                             break;
                         }
                     }
@@ -241,7 +290,7 @@ fn handle_stream(stream: &TcpStream, queue: Queue) {
                 }
             }
             Err(_) => {
-                rollback(&mut uncommitted_cmds, queue);
+                rollback(&mut uncommitted_cmds, queue_table);
                 break;
             }
         }
@@ -251,14 +300,14 @@ fn handle_stream(stream: &TcpStream, queue: Queue) {
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:5248").unwrap();
 
-    let queue = Arc::new(Mutex::new(Vec::new()));
+    let queue_table = Arc::new(RwLock::new(HashMap::new()));
 
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                let queue = queue.clone();
+                let queue_table = queue_table.clone();
                 thread::spawn(move|| {
-                    handle_stream(&stream, queue);
+                    handle_stream(&stream, queue_table);
                 });
             }
             Err(_) => {
