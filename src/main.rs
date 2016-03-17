@@ -6,6 +6,8 @@ use std::time::Duration;
 
 const BLOCKING_POP_POLLING_FREQ:u64 = 100;
 
+type Queue = Arc<Mutex<Vec<String>>>;
+
 enum Command {
     Quit,
     Push(String),
@@ -70,7 +72,7 @@ fn parse_cmd(buffer: Vec<u8>) -> Result<Command,String> {
     }
 }
 
-fn exec_blocking_pop(data: Arc<Mutex<Vec<String>>>) -> String {
+fn exec_blocking_pop(data: Queue) -> String {
     loop {
         let mut data = data.lock().unwrap();
         match data.pop() {
@@ -84,7 +86,7 @@ fn exec_blocking_pop(data: Arc<Mutex<Vec<String>>>) -> String {
     }
 }
 
-fn exec_push(value: String, data: Arc<Mutex<Vec<String>>>) {
+fn exec_push(value: String, data: Queue) {
     let mut data = data.lock().unwrap();
     data.push(value.to_string());
 }
@@ -93,7 +95,7 @@ fn exec_cmd(
     writer: &mut BufWriter<&TcpStream>,
     cmd: Command,
     uncommitted_cmds: &mut Vec<UncommittedCommand>,
-    data: Arc<Mutex<Vec<String>>>
+    data: Queue
     ) -> Result<(),()> {
 
     match cmd {
@@ -128,7 +130,7 @@ fn exec_cmd(
     Ok(())
 }
 
-fn exec_pop(writer: &mut BufWriter<&TcpStream>, data: Arc<Mutex<Vec<String>>>) -> Result<(String),()> {
+fn exec_pop(writer: &mut BufWriter<&TcpStream>, data: Queue) -> Result<(String),()> {
     let mut data = data.lock().unwrap();
     match data.pop() {
         Some(data) => {
@@ -146,7 +148,7 @@ fn exec_cmd_in_transaction(
     writer: &mut BufWriter<&TcpStream>,
     cmd: Command,
     uncommitted_cmds: &mut Vec<UncommittedCommand>,
-    data: Arc<Mutex<Vec<String>>>
+    data: Queue
     ) -> Result<(),()> {
 
     match cmd {
@@ -183,7 +185,7 @@ fn exec_cmd_in_transaction(
     Ok(())
 }
 
-fn rollback(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Arc<Mutex<Vec<String>>>) {
+fn rollback(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Queue) {
     for cmd in uncommitted_cmds.drain(..) {
         match cmd {
             UncommittedCommand::Pop(value) => {
@@ -195,7 +197,7 @@ fn rollback(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Arc<Mutex<Vec<
     }
 }
 
-fn commit(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Arc<Mutex<Vec<String>>>) {
+fn commit(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Queue) {
     for cmd in uncommitted_cmds.drain(..) {
         match cmd {
             UncommittedCommand::Push(value) => {
@@ -207,7 +209,7 @@ fn commit(uncommitted_cmds: &mut Vec<UncommittedCommand>, data: Arc<Mutex<Vec<St
     }
 }
 
-fn handle_stream(stream: &TcpStream, data: Arc<Mutex<Vec<String>>>) {
+fn handle_stream(stream: &TcpStream, queue: Queue) {
     let mut reader = BufReader::new(stream);
     let mut writer = BufWriter::new(stream);
 
@@ -222,12 +224,12 @@ fn handle_stream(stream: &TcpStream, data: Arc<Mutex<Vec<String>>>) {
                     Ok(cmd) => {
                         let in_transaction = uncommitted_cmds.len();
                         let result = if in_transaction > 0 {
-                            exec_cmd_in_transaction(&mut writer, cmd, &mut uncommitted_cmds, data.clone())
+                            exec_cmd_in_transaction(&mut writer, cmd, &mut uncommitted_cmds, queue.clone())
                         } else {
-                            exec_cmd(&mut writer, cmd, &mut uncommitted_cmds, data.clone())
+                            exec_cmd(&mut writer, cmd, &mut uncommitted_cmds, queue.clone())
                         };
                         if result.is_err() {
-                            rollback(&mut uncommitted_cmds, data);
+                            rollback(&mut uncommitted_cmds, queue);
                             break;
                         }
                     }
@@ -239,7 +241,7 @@ fn handle_stream(stream: &TcpStream, data: Arc<Mutex<Vec<String>>>) {
                 }
             }
             Err(_) => {
-                rollback(&mut uncommitted_cmds, data);
+                rollback(&mut uncommitted_cmds, queue);
                 break;
             }
         }
@@ -249,14 +251,14 @@ fn handle_stream(stream: &TcpStream, data: Arc<Mutex<Vec<String>>>) {
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:5248").unwrap();
 
-    let data = Arc::new(Mutex::new(Vec::new()));
+    let queue = Arc::new(Mutex::new(Vec::new()));
 
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                let data = data.clone();
+                let queue = queue.clone();
                 thread::spawn(move|| {
-                    handle_stream(&stream, data);
+                    handle_stream(&stream, queue);
                 });
             }
             Err(_) => {
