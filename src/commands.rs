@@ -16,7 +16,9 @@ pub enum UncommittedCommand {
     Pop(String, QueueName),
 }
 
-pub fn parse_cmd(buffer: Vec<u8>) -> Result<Command,String> {
+pub type ParseResult = Result<Command,String>;
+
+pub fn parse_cmd(buffer: Vec<u8>) -> ParseResult {
     let result = String::from_utf8(buffer);
     match result {
         Ok(buffer) => {
@@ -26,29 +28,13 @@ pub fn parse_cmd(buffer: Vec<u8>) -> Result<Command,String> {
 
             match upcase_cmd {
                 "PUSH" => {
-                    if parts.len() == 3 {
-                        let queue_name = (*parts[1]).to_string();
-                        let data = (*parts.last().unwrap()).to_string();
-                        Ok(Command::Push(data, queue_name))
-                    } else {
-                        Err("Incorrect number of arguments for PUSH".to_string())
-                    }
+                    parse_push(parts)
                 }
                 "POP" => {
-                    if parts.len() == 2 {
-                        let queue_name = (*parts.last().unwrap()).to_string();
-                        Ok(Command::Pop(queue_name))
-                    } else {
-                        Err("Incorrect number of arguments for PUSH".to_string())
-                    }
+                    parse_pop(parts)
                 }
                 "BPOP" => {
-                    if parts.len() == 2 {
-                        let queue_name = (*parts.last().unwrap()).to_string();
-                        Ok(Command::BlockingPop(queue_name))
-                    } else {
-                        Err("Incorrect number of arguments for PUSH".to_string())
-                    }
+                    parse_bpop(parts)
                 }
                 "QUIT" => Ok(Command::Quit),
                 "BEGIN" => Ok(Command::Begin),
@@ -63,3 +49,31 @@ pub fn parse_cmd(buffer: Vec<u8>) -> Result<Command,String> {
     }
 }
 
+fn parse_push(parts: Vec<&str>) -> ParseResult {
+    if parts.len() == 3 {
+        let queue_name = (*parts[1]).to_string();
+        let data = (*parts.last().unwrap()).to_string();
+        Ok(Command::Push(data, queue_name))
+    } else {
+        Err("Incorrect number of arguments for PUSH".to_string())
+    }
+}
+
+
+fn parse_pop(parts: Vec<&str>) -> ParseResult {
+    if parts.len() == 2 {
+        let queue_name = (*parts.last().unwrap()).to_string();
+        Ok(Command::Pop(queue_name))
+    } else {
+        Err("Incorrect number of arguments for PUSH".to_string())
+    }
+}
+
+fn parse_bpop(parts: Vec<&str>) -> ParseResult {
+    if parts.len() == 2 {
+        let queue_name = (*parts.last().unwrap()).to_string();
+        Ok(Command::BlockingPop(queue_name))
+    } else {
+        Err("Incorrect number of arguments for PUSH".to_string())
+    }
+}
