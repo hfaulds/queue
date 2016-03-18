@@ -137,20 +137,35 @@ fn exec_push(value: String, queue_table: QueueTable, queue_name: QueueName) {
 fn get_or_create_queue(queue_table: QueueTable, queue_name: QueueName) -> Queue {
     {
         let read_lock = queue_table.read().unwrap();
-        let result =  read_lock.get(&queue_name);
+        let result = get_queue(&read_lock, &queue_name);
         if result.is_some() {
-            return result.unwrap().clone();
+            return result.unwrap();
         }
     }
     let mut write_lock = queue_table.write().unwrap();
-    {
-        let result = write_lock.get(&queue_name);
-        if result.is_some() {
-            return result.unwrap().clone();
+    match get_queue(&write_lock, &queue_name) {
+        Some(queue) => {
+            queue
+        }
+        None => {
+            create_queue(&mut write_lock, queue_name)
         }
     }
+}
+
+fn get_queue(queue_table: &HashMap<QueueName, Queue>, queue_name: &QueueName) -> Option<Queue> {
+    let result = queue_table.get(queue_name);
+    match result {
+        Some(queue) => {
+            Some(queue.clone())
+        }
+        None => None
+    }
+}
+
+fn create_queue(queue_table: &mut HashMap<QueueName, Queue>, queue_name: QueueName) -> Queue {
     let queue = Arc::new(Mutex::new(Vec::new()));
-    write_lock.insert(queue_name, queue.clone());
+    queue_table.insert(queue_name, queue.clone());
     return queue;
 }
 
