@@ -1,15 +1,12 @@
 use std::thread;
 use std::net::{TcpListener, TcpStream};
 use std::io::{Write, BufWriter, BufRead, BufReader};
-use std::sync::{Arc,Mutex,RwLock};
 use std::time::Duration;
-use std::collections::HashMap;
+
+mod queue_table;
+use queue_table::{QueueName,QueueTable};
 
 const BLOCKING_POP_POLLING_FREQ:u64 = 100;
-
-type Queue = Arc<Mutex<Vec<String>>>;
-type QueueName = String;
-type QueueTable = Arc<RwLock<HashMap<QueueName, Queue>>>;
 
 enum Command {
     Quit,
@@ -91,7 +88,7 @@ fn parse_cmd(buffer: Vec<u8>) -> Result<Command,String> {
 }
 
 fn exec_pop(writer: &mut BufWriter<&TcpStream>, queue_table: QueueTable, queue_name: QueueName) -> Result<(String),()> {
-    match queue_table.read().unwrap().get(&queue_name) {
+    match queue_table.get_queue(&queue_name) {
         Some(queue)  => {
             let mut queue = queue.lock().unwrap();
             match queue.pop() {
@@ -114,7 +111,7 @@ fn exec_pop(writer: &mut BufWriter<&TcpStream>, queue_table: QueueTable, queue_n
 
 
 fn exec_blocking_pop(queue_table: QueueTable, queue_name: QueueName) -> String {
-    let queue = get_or_create_queue(queue_table, queue_name);
+    let queue = queue_table.get_or_create_queue(queue_name);
     loop {
         let mut queue = queue.lock().unwrap();
         match queue.pop() {
@@ -129,44 +126,9 @@ fn exec_blocking_pop(queue_table: QueueTable, queue_name: QueueName) -> String {
 }
 
 fn exec_push(value: String, queue_table: QueueTable, queue_name: QueueName) {
-    let queue = get_or_create_queue(queue_table, queue_name);
+    let queue = queue_table.get_or_create_queue(queue_name);
     let mut queue = queue.lock().unwrap();
     queue.push(value.to_string());
-}
-
-fn get_or_create_queue(queue_table: QueueTable, queue_name: QueueName) -> Queue {
-    {
-        let read_lock = queue_table.read().unwrap();
-        let result = get_queue(&read_lock, &queue_name);
-        if result.is_some() {
-            return result.unwrap();
-        }
-    }
-    let mut write_lock = queue_table.write().unwrap();
-    match get_queue(&write_lock, &queue_name) {
-        Some(queue) => {
-            queue
-        }
-        None => {
-            create_queue(&mut write_lock, queue_name)
-        }
-    }
-}
-
-fn get_queue(queue_table: &HashMap<QueueName, Queue>, queue_name: &QueueName) -> Option<Queue> {
-    let result = queue_table.get(queue_name);
-    match result {
-        Some(queue) => {
-            Some(queue.clone())
-        }
-        None => None
-    }
-}
-
-fn create_queue(queue_table: &mut HashMap<QueueName, Queue>, queue_name: QueueName) -> Queue {
-    let queue = Arc::new(Mutex::new(Vec::new()));
-    queue_table.insert(queue_name, queue.clone());
-    return queue;
 }
 
 fn exec_cmd(
@@ -315,7 +277,7 @@ fn handle_stream(stream: &TcpStream, queue_table: QueueTable) {
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:5248").unwrap();
 
-    let queue_table = Arc::new(RwLock::new(HashMap::new()));
+    let queue_table = QueueTable::new();
 
     for stream in listener.incoming() {
         match stream {
