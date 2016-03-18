@@ -51,8 +51,8 @@ fn parse_cmd(buffer: Vec<u8>) -> Result<Command,String> {
             match upcase_cmd {
                 "PUSH" => {
                     if parts.len() == 3 {
-                        let data = (*parts[1]).to_string();
-                        let queue_name = (*parts.last().unwrap()).to_string();
+                        let queue_name = (*parts[1]).to_string();
+                        let data = (*parts.last().unwrap()).to_string();
                         Ok(Command::Push(data, queue_name))
                     } else {
                         Err("Incorrect number of arguments for PUSH".to_string())
