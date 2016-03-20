@@ -31,7 +31,7 @@ fn exec_pop(writer: &mut BufWriter<&TcpStream>, queue_table: QueueTable, queue_n
     match queue_table.get_queue(&queue_name) {
         Some(queue)  => {
             let mut queue = queue.lock().unwrap();
-            match queue.pop() {
+            match queue.pop_front() {
                 Some(data) => {
                     let _ = writer.write(format!("{}\r\n", data).as_bytes());
                     Ok(data)
@@ -54,7 +54,7 @@ fn exec_blocking_pop(queue_table: QueueTable, queue_name: QueueName) -> String {
     let queue = queue_table.get_or_create_queue(queue_name);
     loop {
         let mut queue = queue.lock().unwrap();
-        match queue.pop() {
+        match queue.pop_front() {
             Some(data) => {
                 return data;
             }
@@ -68,7 +68,7 @@ fn exec_blocking_pop(queue_table: QueueTable, queue_name: QueueName) -> String {
 fn exec_push(value: String, queue_table: QueueTable, queue_name: QueueName) {
     let queue = queue_table.get_or_create_queue(queue_name);
     let mut queue = queue.lock().unwrap();
-    queue.push(value.to_string());
+    queue.push_back(value.to_string());
 }
 
 fn exec_cmd(

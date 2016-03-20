@@ -1,7 +1,8 @@
 use std::sync::{Arc,Mutex,RwLock};
 use std::collections::HashMap;
+use std::collections::VecDeque;
 
-pub type Queue = Arc<Mutex<Vec<String>>>;
+pub type Queue = Arc<Mutex<VecDeque<String>>>;
 pub type QueueName = String;
 pub struct QueueTable {
     inner: Arc<RwLock<HashMap<QueueName, Queue>>>
@@ -18,7 +19,7 @@ fn get_queue_with_lock(lock: &HashMap<QueueName, Queue>, queue_name: &QueueName)
 }
 
 fn create_queue(lock: &mut HashMap<QueueName, Queue>, queue_name: QueueName) -> Queue {
-    let queue = Arc::new(Mutex::new(Vec::new()));
+    let queue = Arc::new(Mutex::new(VecDeque::new()));
     lock.insert(queue_name, queue.clone());
     return queue;
 }
