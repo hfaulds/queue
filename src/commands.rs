@@ -1,5 +1,7 @@
 use queue_table::{QueueName};
 
+#[derive(PartialEq)]
+#[derive(Debug)]
 pub enum Command {
     Quit,
     Push(String, QueueName),
@@ -70,10 +72,10 @@ impl Command  {
             if is_parsing_command {
                 match c {
                     '\'' => {
-                        return Err("Unexpected quote in command name".to_string());
+                        return Err("Malformed command".to_string());
                     },
                     '\\' => {
-                        return Err("Unexpected backslash in command name".to_string());
+                        return Err("Malformed command".to_string());
                     },
                     ' ' => {
                         is_parsing_command = false;
@@ -123,7 +125,7 @@ impl Command  {
         if current_string.len() == 0 {
             Ok(CommandToken { command: command.to_uppercase(), arguments: arguments })
         } else {
-            Err("trailing charactrs".to_string())
+            Err("missing end quote".to_string())
         }
     }
 }
@@ -144,7 +146,7 @@ fn parse_pop(arguments: Vec<String>) -> ParseResult {
         let queue_name = arguments[0].clone();
         Ok(Command::Pop(queue_name))
     } else {
-        Err("Incorrect number of arguments for PUSH".to_string())
+        Err("Incorrect number of arguments for POP".to_string())
     }
 }
 
@@ -153,6 +155,6 @@ fn parse_bpop(arguments: Vec<String>) -> ParseResult {
         let queue_name = arguments[0].clone();
         Ok(Command::BlockingPop(queue_name))
     } else {
-        Err("Incorrect number of arguments for PUSH".to_string())
+        Err("Incorrect number of arguments for BPOP".to_string())
     }
 }
