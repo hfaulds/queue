@@ -3,11 +3,10 @@ use std::net::{TcpListener, TcpStream};
 use std::io::{Write, BufWriter, BufRead, BufReader};
 use std::time::Duration;
 
-mod queue_table;
-use queue_table::{QueueName,QueueTable};
+extern crate queue_experiments;
+use queue_experiments::queue_table::{QueueName,QueueTable};
 
-mod commands;
-use commands::{Command,UncommittedCommand};
+use queue_experiments::commands::{Command,UncommittedCommand};
 
 const BLOCKING_POP_POLLING_FREQ:u64 = 100;
 

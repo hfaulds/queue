@@ -1,4 +1,4 @@
 [package]
-name = "queue-experiments"
+name = "queue_experiments"
 version = "0.1.0"
 authors = ["fauldsh@gmail.com"]
