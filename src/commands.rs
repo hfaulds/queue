@@ -18,29 +18,31 @@ pub enum UncommittedCommand {
 
 pub type ParseResult = Result<Command,String>;
 
+struct CommandToken {
+    command: String,
+    arguments: Vec<String>
+}
+
 impl Command  {
     pub fn parse(buffer: Vec<u8>) -> ParseResult {
         let result = Command::tokenize(buffer);
         match result {
-            Ok(tokens) => {
-                let cmd: &str = tokens.first().unwrap();
-                let upcase_cmd: &str = &cmd.to_uppercase();
-
-                match upcase_cmd {
+            Ok(command_token) => {
+                match &command_token.command as &str {
                     "PUSH" => {
-                        parse_push(&tokens)
+                        parse_push(command_token.arguments)
                     }
                     "POP" => {
-                        parse_pop(&tokens)
+                        parse_pop(command_token.arguments)
                     }
                     "BPOP" => {
-                        parse_bpop(&tokens)
+                        parse_bpop(command_token.arguments)
                     }
                     "QUIT" => Ok(Command::Quit),
                     "BEGIN" => Ok(Command::Begin),
                     "COMMIT" => Ok(Command::Commit),
                     "ABORT" => Ok(Command::Abort),
-                    _ => Err(format!("Unknown Command: {}", cmd))
+                    cmd => Err(format!("Unknown Command: {}", cmd))
                 }
             }
             Err(e) => {
@@ -49,20 +51,38 @@ impl Command  {
         }
     }
 
-    fn tokenize(buffer: Vec<u8>) -> Result<Vec<String>, String> {
+    fn tokenize(buffer: Vec<u8>) -> Result<CommandToken, String> {
         let result = String::from_utf8(buffer);
 
         if result.is_err() {
             return Err("Command included non utf8 characters".to_string());
         }
 
-        let mut tokens = Vec::new();
+        let mut command = String::new();
+        let mut arguments = Vec::new();
         let mut current_string = String::new();
         let mut is_escaped = false;
         let mut is_quoted = false;
+        let mut is_parsing_command = true;
 
-        for c in result.unwrap().trim().chars() {
-            if !is_quoted {
+        let buffer = result.unwrap();
+        for c in buffer.trim().chars() {
+            if is_parsing_command {
+                match c {
+                    '\'' => {
+                        return Err("Unexpected quote in command name".to_string());
+                    },
+                    '\\' => {
+                        return Err("Unexpected backslash in command name".to_string());
+                    },
+                    ' ' => {
+                        is_parsing_command = false;
+                    },
+                    _ => {
+                        command.push(c);
+                    }
+                }
+            } else if !is_quoted {
                 match c {
                     '\'' => { is_quoted = true },
                     ' ' => {},
@@ -86,7 +106,7 @@ impl Command  {
             } else {
                 match c {
                     '\'' => {
-                        tokens.push(current_string);
+                        arguments.push(current_string);
                         is_quoted = false;
                         current_string = String::new();
                     },
@@ -101,17 +121,17 @@ impl Command  {
         }
 
         if current_string.len() == 0 {
-            Ok(tokens)
+            Ok(CommandToken { command: command.to_uppercase(), arguments: arguments })
         } else {
             Err("trailing charactrs".to_string())
         }
     }
 }
 
-fn parse_push(tokens: &Vec<String>) -> ParseResult {
-    if tokens.len() == 3 {
-        let queue_name = tokens[1].clone();
-        let data = tokens[2].clone();
+fn parse_push(arguments: Vec<String>) -> ParseResult {
+    if arguments.len() == 2 {
+        let queue_name = arguments[0].clone();
+        let data = arguments[1].clone();
         Ok(Command::Push(data, queue_name))
     } else {
         Err("Incorrect number of arguments for PUSH".to_string())
@@ -119,18 +139,18 @@ fn parse_push(tokens: &Vec<String>) -> ParseResult {
 }
 
 
-fn parse_pop(tokens: &Vec<String>) -> ParseResult {
-    if tokens.len() == 2 {
-        let queue_name = tokens[1].clone();
+fn parse_pop(arguments: Vec<String>) -> ParseResult {
+    if arguments.len() == 1 {
+        let queue_name = arguments[0].clone();
         Ok(Command::Pop(queue_name))
     } else {
         Err("Incorrect number of arguments for PUSH".to_string())
     }
 }
 
-fn parse_bpop(tokens: &Vec<String>) -> ParseResult {
-    if tokens.len() == 2 {
-        let queue_name = tokens[1].clone();
+fn parse_bpop(arguments: Vec<String>) -> ParseResult {
+    if arguments.len() == 1 {
+        let queue_name = arguments[0].clone();
         Ok(Command::BlockingPop(queue_name))
     } else {
         Err("Incorrect number of arguments for PUSH".to_string())
