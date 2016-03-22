@@ -7,7 +7,7 @@ mod queue_table;
 use queue_table::{QueueName,QueueTable};
 
 mod commands;
-use commands::{parse_cmd,Command,UncommittedCommand};
+use commands::{Command,UncommittedCommand};
 
 const BLOCKING_POP_POLLING_FREQ:u64 = 100;
 
@@ -185,7 +185,7 @@ fn handle_stream(stream: &TcpStream, queue_table: QueueTable) {
         let result = read_stream(&mut reader);
         match result {
             Ok(result) => {
-                let cmd = parse_cmd(result);
+                let cmd = Command::parse(result);
                 match cmd {
                     Ok(cmd) => {
                         let in_transaction = uncommitted_cmds.len();
