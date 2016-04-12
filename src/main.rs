@@ -15,7 +15,7 @@ fn main() {
             Ok(stream) => {
                 let queue_table = queue_table.clone();
                 thread::spawn(move|| {
-                    Connection::new(&stream, queue_table).listen();
+                    Connection::new(&stream, &queue_table).listen();
                 });
             }
             Err(_) => {
