@@ -1,5 +1,5 @@
 use std::net::{TcpStream};
-use std::io::{Write, BufWriter, BufRead, BufReader};
+use std::io::{Write, BufWriter, Read, BufRead, BufReader};
 use std::time::Duration;
 use std::thread;
 
@@ -11,17 +11,17 @@ const BLOCKING_POP_POLLING_FREQ:u64 = 100;
 
 pub struct Connection<'a> {
     queue_table: &'a QueueTable,
-    reader: BufReader<& 'a TcpStream>,
-    writer: BufWriter<& 'a TcpStream>,
+    reader: &'a mut BufRead,
+    writer: &'a mut Write,
     uncommitted_cmds: Vec<UncommittedCommand>
 }
 
 impl <'a>Connection<'a> {
-    pub fn new(stream: &'a TcpStream, queue_table: &'a QueueTable) -> Connection<'a> {
+    pub fn new(reader: &'a mut BufRead, writer: &'a mut Write, queue_table: &'a QueueTable) -> Connection<'a> {
         Connection {
             queue_table: &queue_table,
-            reader: BufReader::new(&stream),
-            writer: BufWriter::new(&stream),
+            reader: reader,
+            writer: writer,
             uncommitted_cmds: Vec::new()
         }
     }

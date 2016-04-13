@@ -1,5 +1,6 @@
 use std::thread;
 use std::net::{TcpListener};
+use std::io::{BufWriter, BufReader};
 
 extern crate queue_experiments;
 use queue_experiments::queue_table::{QueueTable};
@@ -15,7 +16,9 @@ fn main() {
             Ok(stream) => {
                 let queue_table = queue_table.clone();
                 thread::spawn(move|| {
-                    Connection::new(&stream, &queue_table).listen();
+                    let mut reader = BufReader::new(&stream);
+                    let mut writer = BufWriter::new(&stream);
+                    Connection::new(&mut reader, &mut writer, &queue_table).listen();
                 });
             }
             Err(_) => {
