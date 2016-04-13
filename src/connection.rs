@@ -27,38 +27,42 @@ impl <'a>Connection<'a> {
 
     pub fn listen(&mut self) {
         loop {
-            let result = self.read_stream();
-            match result {
-                Ok(result) => {
-                    let cmd = Command::parse(result);
-                    match cmd {
-                        Ok(cmd) => {
-                            let in_transaction = self.uncommitted_cmds.len();
-                            let result = if in_transaction > 0 {
-                                self.exec_cmd_in_transaction(cmd)
-                            } else {
-                                self.exec_cmd(cmd)
-                            };
-                            if result.is_err() {
-                                self.rollback();
-                                self.flush();
-                                break;
-                            }
-                        }
-                        Err(message) => {
-                            self.write(message.as_bytes());
-                            self.write(b"\r\n");
+            let quit = self.process_message();
+            self.flush();
+            if quit {
+                self.rollback();
+                break;
+            }
+        }
+    }
+
+    pub fn process_message(&mut self) -> bool {
+        match self.read_message() {
+            Ok(result) => {
+                let cmd = Command::parse(result);
+                match cmd {
+                    Ok(cmd) => {
+                        if self.is_in_transaction() {
+                            self.exec_cmd_in_transaction(cmd)
+                        } else {
+                            self.exec_cmd(cmd)
                         }
                     }
-                }
-                Err(_) => {
-                    self.rollback();
-                    self.flush();
-                    break;
+                    Err(message) => {
+                        self.write(message.as_bytes());
+                        self.write(b"\r\n");
+                        false
+                    }
                 }
             }
-            self.flush();
+            Err(_) => {
+                true
+            }
         }
+    }
+
+    fn is_in_transaction(&self) -> bool {
+        self.uncommitted_cmds.len() > 0
     }
 
     fn write(&mut self, buf: &[u8]) {
@@ -69,7 +73,7 @@ impl <'a>Connection<'a> {
         let _ = self.writer.flush();
     }
 
-    fn read_stream(&mut self) -> Result<Vec<u8>,()> {
+    fn read_message(&mut self) -> Result<Vec<u8>,()> {
         let mut buffer = Vec::new();
         let result = self.reader.read_until(b';', &mut buffer);
 
@@ -122,7 +126,7 @@ impl <'a>Connection<'a> {
         }
     }
 
-    fn exec_cmd(&mut self, cmd: Command) -> Result<(),()> {
+    fn exec_cmd(&mut self, cmd: Command) -> bool {
         match cmd {
             Command::Push(value, queue_name) => {
                 exec_push(value, &self.queue_table, queue_name);
@@ -137,7 +141,7 @@ impl <'a>Connection<'a> {
             }
             Command::Quit => {
                 self.write(b"Bye bye");
-                return Err(());
+                return true;
             }
             Command::Begin => {
                 self.uncommitted_cmds.push(UncommittedCommand::Begin);
@@ -149,11 +153,10 @@ impl <'a>Connection<'a> {
                 self.write(b"Not in transaction\r\n");
             }
         };
-
-        Ok(())
+        false
     }
 
-    fn exec_cmd_in_transaction(&mut self, cmd: Command) -> Result<(),()> {
+    fn exec_cmd_in_transaction(&mut self, cmd: Command) -> bool {
         match cmd {
             Command::Push(value, queue_name) => {
                 self.uncommitted_cmds.push(UncommittedCommand::Push(value, queue_name));
@@ -171,7 +174,7 @@ impl <'a>Connection<'a> {
             }
             Command::Quit => {
                 self.write(b"Bye bye");
-                return Err(());
+                return true;
             }
             Command::Begin => {
                 self.write(b"Already in transaction\r\n");
@@ -183,7 +186,7 @@ impl <'a>Connection<'a> {
                 self.commit();
             }
         };
-        Ok(())
+        false
     }
 
     fn rollback(&mut self) {
