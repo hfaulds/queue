@@ -1,5 +1,4 @@
-use std::net::{TcpStream};
-use std::io::{Write, BufWriter, Read, BufRead, BufReader};
+use std::io::{Write, BufRead};
 use std::time::Duration;
 use std::thread;
 
@@ -42,24 +41,32 @@ impl <'a>Connection<'a> {
                             };
                             if result.is_err() {
                                 self.rollback();
-                                let _ = self.writer.flush();
+                                self.flush();
                                 break;
                             }
                         }
                         Err(message) => {
-                            let _ = self.writer.write(message.as_bytes());
-                            let _ = self.writer.write(b"\r\n");
+                            self.write(message.as_bytes());
+                            self.write(b"\r\n");
                         }
                     }
                 }
                 Err(_) => {
                     self.rollback();
-                    let _ = self.writer.flush();
+                    self.flush();
                     break;
                 }
             }
-            let _ = self.writer.flush();
+            self.flush();
         }
+    }
+
+    fn write(&mut self, buf: &[u8]) {
+        let _ = self.writer.write(buf);
+    }
+
+    fn flush(&mut self) {
+        let _ = self.writer.flush();
     }
 
     fn read_stream(&mut self) -> Result<Vec<u8>,()> {
@@ -84,17 +91,17 @@ impl <'a>Connection<'a> {
                 let mut queue = queue.lock().unwrap();
                 match queue.pop_front() {
                     Some(data) => {
-                        let _ = self.writer.write(format!("{}\r\n", data).as_bytes());
+                        self.write(format!("{}\r\n", data).as_bytes());
                         Ok(data)
                     }
                     None => {
-                        let _ = self.writer.write(b"NO DATA\r\n");
+                        self.write(b"NO DATA\r\n");
                         Err(())
                     }
                 }
             }
             None => {
-                let _ = self.writer.write(b"NO SUCH QUEUE\r\n");
+                self.write(b"NO SUCH QUEUE\r\n");
                 Err(())
             }
         }
@@ -119,27 +126,27 @@ impl <'a>Connection<'a> {
         match cmd {
             Command::Push(value, queue_name) => {
                 exec_push(value, &self.queue_table, queue_name);
-                let _ = self.writer.write(b"SUCCESS\r\n");
+                self.write(b"SUCCESS\r\n");
             }
             Command::Pop(queue_name) => {
                 let _ = self.exec_pop(queue_name);
             }
             Command::BlockingPop(queue_name) => {
                 let data = self.exec_blocking_pop(queue_name.clone());
-                let _ = self.writer.write(format!("{}\r\n", data).as_bytes());
+                self.write(format!("{}\r\n", data).as_bytes());
             }
             Command::Quit => {
-                let _ = self.writer.write(b"Bye bye");
+                self.write(b"Bye bye");
                 return Err(());
             }
             Command::Begin => {
                 self.uncommitted_cmds.push(UncommittedCommand::Begin);
             }
             Command::Abort => {
-                let _ = self.writer.write(b"Not in transaction\r\n");
+                self.write(b"Not in transaction\r\n");
             }
             Command::Commit => {
-                let _ = self.writer.write(b"Not in transaction\r\n");
+                self.write(b"Not in transaction\r\n");
             }
         };
 
@@ -159,15 +166,15 @@ impl <'a>Connection<'a> {
             }
             Command::BlockingPop(queue_name) => {
                 let data = self.exec_blocking_pop(queue_name.clone());
-                let _ = self.writer.write(format!("{}\r\n", data).as_bytes());
+                self.write(format!("{}\r\n", data).as_bytes());
                 self.uncommitted_cmds.push(UncommittedCommand::Pop(data, queue_name));
             }
             Command::Quit => {
-                let _ = self.writer.write(b"Bye bye");
+                self.write(b"Bye bye");
                 return Err(());
             }
             Command::Begin => {
-                let _ = self.writer.write(b"Already in transaction\r\n");
+                self.write(b"Already in transaction\r\n");
             }
             Command::Abort => {
                 self.rollback();
