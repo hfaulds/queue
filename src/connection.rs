@@ -92,7 +92,6 @@ impl <'a>Connection<'a> {
     fn exec_pop(&mut self, queue_name: QueueName) -> Result<(String),()> {
         match self.queue_table.get_queue(&queue_name) {
             Some(queue)  => {
-                let mut queue = queue.lock().unwrap();
                 match queue.pop_front() {
                     Some(data) => {
                         self.write(format!("{}\r\n", data).as_bytes());
@@ -114,7 +113,6 @@ impl <'a>Connection<'a> {
     fn exec_blocking_pop(&mut self, queue_name: QueueName) -> String {
         let queue = self.queue_table.get_or_create_queue(queue_name);
         loop {
-            let mut queue = queue.lock().unwrap();
             match queue.pop_front() {
                 Some(data) => {
                     return data;
@@ -218,6 +216,5 @@ impl <'a>Connection<'a> {
 // commit and rollback borrow self as mutable once already
 fn exec_push(value: String, queue_table: &QueueTable, queue_name: QueueName) {
     let queue = queue_table.get_or_create_queue(queue_name);
-    let mut queue = queue.lock().unwrap();
     queue.push_back(value.to_string());
 }

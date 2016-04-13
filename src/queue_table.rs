@@ -2,8 +2,10 @@ use std::sync::{Arc,Mutex,RwLock};
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
-pub type Queue = Arc<Mutex<VecDeque<String>>>;
 pub type QueueName = String;
+pub struct Queue {
+    inner: Arc<Mutex<VecDeque<String>>>
+}
 pub struct QueueTable {
     inner: Arc<RwLock<HashMap<QueueName, Queue>>>
 }
@@ -19,9 +21,33 @@ fn get_queue_with_lock(lock: &HashMap<QueueName, Queue>, queue_name: &QueueName)
 }
 
 fn create_queue(lock: &mut HashMap<QueueName, Queue>, queue_name: QueueName) -> Queue {
-    let queue = Arc::new(Mutex::new(VecDeque::new()));
+    let queue = Queue::new();
     lock.insert(queue_name, queue.clone());
     return queue;
+}
+
+impl Queue {
+    pub fn new() -> Queue {
+        Queue { inner: Arc::new(Mutex::new(VecDeque::new())) }
+    }
+
+    pub fn push_back(&self, value: String) {
+        let mut queue = self.inner.lock().unwrap();
+        queue.push_back(value)
+    }
+
+    pub fn pop_front(&self) -> Option<String> {
+        let mut queue = self.inner.lock().unwrap();
+        queue.pop_front()
+    }
+}
+
+impl Clone for Queue {
+    fn clone(&self) -> Queue {
+        Queue {
+            inner: self.inner.clone()
+        }
+    }
 }
 
 impl QueueTable {
