@@ -94,21 +94,21 @@ mod tests {
         it "it_returns_err_for_unquoted_characters_in_argument" {
             assert_eq!(
                 Command::parse("POP a".to_string().into_bytes()),
-                Err("unqouted character: a".to_string())
+                Err("Unqouted character: a".to_string())
                 );
         }
 
         it "it_returns_err_for_unescaped_characters_in_argument" {
             assert_eq!(
                 Command::parse("POP '\\a'".to_string().into_bytes()),
-                Err("unescapeable character: a".to_string())
+                Err("Unescapeable character: a".to_string())
                 );
         }
 
         it "it_returns_err_for_missing_end_quote_in_argument" {
             assert_eq!(
                 Command::parse("POP 'a' 'b".to_string().into_bytes()),
-                Err("missing end quote".to_string())
+                Err("Missing end quote".to_string())
                 );
         }
 
